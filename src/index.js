@@ -1,87 +1,75 @@
-//  Install npm dependencies first
-//  npm init
-//  npm install --save url@0.10.3
-//  npm install --save http-proxy@1.11.1
+const http = require('http')
+const port = process.env.PORT || 24443
+const net = require('net')
+const url = require('url')
 
-var httpProxy = require("http-proxy");
-var http = require("http");
-var url = require("url");
-var net = require('net');
+const requestHandler = (req, res) => { // discard all request to proxy server except HTTP/1.1 CONNECT method
+  res.writeHead(405, {'Content-Type': 'text/plain'})
+  res.end('Method not allowed')
+}
 
-var server = http.createServer(function (req, res) {
-	var urlObj = url.parse(req.url);
-	var target = urlObj.protocol + "//" + urlObj.host;
+const server = http.createServer(requestHandler)
 
-	console.log("Proxy HTTP request for:", target);
+const listener = server.listen(port, (err) => {
+  if (err) {
+    return console.error(err)
+  }
+  const info = listener.address()
+  console.log(`Server is listening on address ${info.address} port ${info.port}`)
+})
 
-	var proxy = httpProxy.createProxyServer({});
-
-	proxy.on("error", function (err, req, res) {
-		console.log("proxy error", err);
-		res.end();
-	});
-
-	proxy.web(req, res, {target: target});
-// }).listen(8080);  //this is the port your clients will connect to
-}).listen(24443);
-
-var regex_hostport = /^([^:]+)(:([0-9]+))?$/;
-
-var getHostPortFromString = function (hostString, defaultPort) {
-	var host = hostString;
-	var port = defaultPort;
-
-	var result = regex_hostport.exec(hostString);
-
-	if (result != null) {
-		host = result[1];
-
-		if (result[2] != null) {
-			port = result[3];
-		}
-	}
-
-	return ( [host, port] );
-};
-
-server.addListener('connect', function (req, socket, bodyhead) {
-	var hostPort = getHostPortFromString(req.url, 443);
-	var hostDomain = hostPort[0];
-	var port = parseInt(hostPort[1]);
-
-	console.log("Proxying HTTPS request for:", hostDomain, port);
-
-	var proxySocket = new net.Socket();
-
-	proxySocket.connect(port, hostDomain, function () {
-			proxySocket.write(bodyhead);
-			socket.write("HTTP/" + req.httpVersion + " 200 Connection established\r\n\r\n");
-		}
-	);
-
-	proxySocket.on('data', function (chunk) {
-		socket.write(chunk);
-	});
-
-	proxySocket.on('end', function () {
-		socket.end();
-	});
-
-	proxySocket.on('error', function () {
-		socket.write("HTTP/" + req.httpVersion + " 500 Connection error\r\n\r\n");
-		socket.end();
-	});
-
-	socket.on('data', function (chunk) {
-		proxySocket.write(chunk);
-	});
-
-	socket.on('end', function () {
-		proxySocket.end();
-	});
-
-	socket.on('error', function () {
-		proxySocket.end();
-	});
-
-});
+server.on('connect', (req, clientSocket, head) => { // listen only for HTTP/1.1 CONNECT method
+  console.log(clientSocket.remoteAddress, clientSocket.remotePort, req.method, req.url)
+//   if (!req.headers['proxy-authorization']) { // here you can add check for any username/password, I just check that this header must exist!
+//     clientSocket.write([
+//       'HTTP/1.1 407 Proxy Authentication Required',
+//       'Proxy-Authenticate: Basic realm="proxy"',
+//       'Proxy-Connection: close',
+//     ].join('\r\n'))
+//     clientSocket.end('\r\n\r\n')  // empty body
+//     return
+//   }
+  const {port, hostname} = url.parse(`//${req.url}`, false, true) // extract destination host and port from CONNECT request
+  if (hostname && port) {
+    const serverErrorHandler = (err) => {
+      console.error(err.message)
+      if (clientSocket) {
+        clientSocket.end(`HTTP/1.1 500 ${err.message}\r\n`)
+      }
+    }
+    const serverEndHandler = () => {
+      if (clientSocket) {
+        clientSocket.end(`HTTP/1.1 500 External Server End\r\n`)
+      }
+    }
+    const serverSocket = net.connect(port, hostname) // connect to destination host and port
+    const clientErrorHandler = (err) => {
+      console.error(err.message)
+      if (serverSocket) {
+        serverSocket.end()
+      }
+    }
+    const clientEndHandler = () => {
+      if (serverSocket) {
+        serverSocket.end()
+      }
+    }
+    clientSocket.on('error', clientErrorHandler)
+    clientSocket.on('end', clientEndHandler)
+    serverSocket.on('error', serverErrorHandler)
+    serverSocket.on('end', serverEndHandler)
+    serverSocket.on('connect', () => {
+      clientSocket.write([
+        'HTTP/1.1 200 Connection Established',
+        'Proxy-agent: Node-VPN',
+      ].join('\r\n'))
+      clientSocket.write('\r\n\r\n') // empty body
+      // "blindly" (for performance) pipe client socket and destination socket between each other
+      serverSocket.pipe(clientSocket, {end: false})
+      clientSocket.pipe(serverSocket, {end: false})
+    })
+  } else {
+    clientSocket.end('HTTP/1.1 400 Bad Request\r\n')
+    clientSocket.destroy()
+  }
+})
