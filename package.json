@@ -1,0 +1,17 @@
+{
+	"name": "hyperproxy-server",
+	"version": "0.1.0",
+	"description": "HTTP/HTTPS proxy that routes requests through a P2P mesh.",
+	"main": "src/index.js",
+	"scripts": {
+		"start": "node .",
+		"test": "jest"
+	},
+	"keywords": [],
+	"author": "Joseph (Ashe Juniper) Caruso",
+	"license": "AGPL-3.0",
+	"dependencies": {
+		"http-proxy": "^1.18.1",
+		"url": "^0.11.0"
+	}
+}
