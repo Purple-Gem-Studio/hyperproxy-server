@@ -31,6 +31,15 @@ server.on('connect', (req, clientSocket, head) => { // listen only for HTTP/1.1 
 //   }
   const {port, hostname} = url.parse(`//${req.url}`, false, true) // extract destination host and port from CONNECT request
   if (hostname && port) {
+	if (typeof hostname === 'string' && hostname.includes('google')) {
+        clientSocket.end(`HTTP/1.1 500 Google is banned.\r\n`);
+		console.log("Connection refused: Google was blocked for safety.");
+	}
+
+	const serverDataHandler = (data) => {
+		// console.log('server:', data.toString());
+		console.log('server: received data from', serverSocket.remoteAddress, hostname);
+	}
     const serverErrorHandler = (err) => {
       console.error(err.message)
       if (clientSocket) {
@@ -39,10 +48,14 @@ server.on('connect', (req, clientSocket, head) => { // listen only for HTTP/1.1 
     }
     const serverEndHandler = () => {
       if (clientSocket) {
-        clientSocket.end(`HTTP/1.1 500 External Server End\r\n`)
+        clientSocket.end(`HTTP/1.1 500 Connection closed forcibly.\r\n`);
       }
     }
     const serverSocket = net.connect(port, hostname) // connect to destination host and port
+	const clientDataHandler = (data) => {
+		// console.log('client:', data.toString());
+		console.log('client: received data from', serverSocket.remoteAddress, hostname);
+	}
     const clientErrorHandler = (err) => {
       console.error(err.message)
       if (serverSocket) {
@@ -54,8 +67,10 @@ server.on('connect', (req, clientSocket, head) => { // listen only for HTTP/1.1 
         serverSocket.end()
       }
     }
+    clientSocket.on('data', clientDataHandler)
     clientSocket.on('error', clientErrorHandler)
     clientSocket.on('end', clientEndHandler)
+    serverSocket.on('data', serverDataHandler)
     serverSocket.on('error', serverErrorHandler)
     serverSocket.on('end', serverEndHandler)
     serverSocket.on('connect', () => {
